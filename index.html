@@ -71,6 +71,12 @@ function loadSheet(src){
 const sheetK=loadSheet(window.LAMPAN_SHEETS[0]); sheetK.cols=4; sheetK.rows=2;
 const sheetL=loadSheet(window.LAMPAN_SHEETS[1]); sheetL.cols=4; sheetL.rows=2;
 const sheetT=loadSheet(window.LAMPAN_SHEETS[2]); sheetT.cols=8; sheetT.rows=4;
+// 8-dir sheets (PIL 1536x1024, magenta chroma):
+// hopp-8dir: 8x1 row L→R N NE E SE S SW W NW, sprites sit mid-cell
+// dashhopp-8dir: 3x3 compass NW N NE / W . E / SW S SE (center empty)
+// charge-8dir: 8x2  top HOLD / bottom RELEASE  same L→R order (NW release present)
+// dashslash-8dir: 3x3 compass like dashhopp (center empty)
+// charge-release-heavy: 8x2 L→R N..NW, row0 strike / row1 follow-through
 const sheetHopp=loadSheet(window.LAMPAN_SHEETS[3]); sheetHopp.cols=8; sheetHopp.rows=1;
 const sheetDashH=loadSheet(window.LAMPAN_SHEETS[4]); sheetDashH.cols=3; sheetDashH.rows=3;
 const sheetChg=loadSheet(window.LAMPAN_SHEETS[5]); sheetChg.cols=8; sheetChg.rows=2;
@@ -131,6 +137,7 @@ function animDir8(){
   return p.face>=0 ? 2 : 6;
 }
 
+
 function fit(){
   const s=Math.max(1, Math.floor(Math.min(innerWidth/W, innerHeight/H)));
   canvas.style.width=(W*s)+"px";
@@ -145,6 +152,7 @@ canvas.addEventListener("mousedown",e=>{
   mouseHeld=1; canvas.focus();
   if(state!=="play") return;
   p.chargeHold=1;
+  // dashslash: uncharged tap mid-dash (macro only — no micro flag in this demo)
   if(p.dash && !p.atkHeavy){
     p.atkDash=ATK_DASH_T;
     p.atkDir=animDir8();
@@ -158,6 +166,7 @@ addEventListener("mouseup",e=>{
       p.atkDash=0;
       p.atkDir=animDir8();
     }
+    // short tap mid-dash already started atkDash on mousedown
   }
   mouseHeld=0; p.chargeHold=0;
 });
@@ -165,6 +174,7 @@ addEventListener("mouseup",e=>{
 function hold(a,b){ return !!(keys[a]||keys[b]); }
 function pressed(code){ return !!keys[code]; }
 
+// layers: 0 near, 1 mid, 2 deep
 const LY=[0,1,2];
 function lyScale(z){ return z===0?1.06 : z===1?1 : 0.84; }
 function lyY(z){ return z===0?10 : z===1?0 : -14; }
@@ -174,20 +184,26 @@ function rect(x,y,w,h,z,kind,meta){
   return {x,y,w,h,z:z??1,kind:kind||"solid",t:0,fall:0,gone:0,meta:meta||{}};
 }
 
+// one scrolling strip, tiles
 const solids=[];
 function floor(x,w,z,y){ solids.push(rect(x,(y??11)*T,w,4*T,z,"solid")); }
 function plat(x,w,z,yt,kind){ solids.push(rect(x,yt*T,w,T,z,kind||"solid")); }
 
+// --- room 1 tunnel ---
 floor(0, 18*T, 1);
 floor(0, 18*T, 2);
 floor(0, 18*T, 0);
+// hanging root visual only later
 const lampDock={x:7*T,y:9*T+4,z:1};
 
+// --- room 2 gap ---
+// island A ends at 18, gap 18-21 (3 tiles, run-jump), island B 21-40
 floor(21*T, 19*T, 1);
 floor(21*T, 19*T, 2);
 floor(21*T, 19*T, 0);
 const myrrh={x:26*T,y:10*T,got:0};
 
+// --- room 3 hole + ridge ---
 floor(40*T, 22*T, 1);
 floor(40*T, 22*T, 2);
 floor(40*T, 22*T, 0);
@@ -195,23 +211,29 @@ const stations=[
   {x:44*T,y:10*T,w:2*T,h:2*T,z:1,kind:"hole"},
   {x:50*T,y:9*T,w:3*T,h:T,z:1,kind:"ridge"}
 ];
-plat(50*T, 3*T, 2, 8, "solid");
+plat(50*T, 3*T, 2, 8, "solid"); // deeper ridge to land on
 
+// --- falling 3-tile ---
 const faller=rect(64*T, 11*T, 3*T, T, 1, "fall");
 solids.push(faller);
-floor(68*T, 8*T, 1, 13);
+floor(68*T, 8*T, 1, 13); // catch ledge lower
 floor(68*T, 8*T, 1, 11);
+// gap under faller: no floor 62-68 on mid except faller
+// cut implicit: we didn't extend previous floor past 62
 
+// wall
 solids.push(rect(78*T, 6*T, T, 5*T, 1, "wall"));
 floor(79*T, 16*T, 1);
 floor(79*T, 16*T, 2);
 floor(79*T, 16*T, 0);
 
+// crossing — jump inward (W) while moving
 const crossing={x:88*T,y:9*T,w:3*T,h:3*T,z:1};
-floor(94*T, 18*T, 2);
-floor(94*T, 4*T, 1);
+floor(94*T, 18*T, 2); // parallel street on deep
+floor(94*T, 4*T, 1);  // mid drops, force the turn or stay short
 const lerugn={x:108*T,y:8*T};
 
+// silhouettes on deep
 const folks=[
   {x:30*T,y:10*T+2,z:2,vx:0.35,min:26*T,max:38*T},
   {x:48*T,y:10*T+2,z:2,vx:-0.25,min:42*T,max:60*T},
@@ -252,6 +274,7 @@ function onStation(){
     if(s.z!==p.z) continue;
     if(aabb(b,{x:s.x,y:s.y,w:s.w,h:s.h})) return s;
   }
+  // crossing counts as W-station if moving
   if(p.z===1 && Math.abs(p.vx)>0.4 && aabb(b,{x:crossing.x,y:crossing.y,w:crossing.w,h:crossing.h}))
     return {kind:"cross"};
   return null;
@@ -303,6 +326,7 @@ function physics(){
   if(p.x>62*T) leftB=1;
   p.proud = leftB?0:1;
 
+  // stations
   const st=onStation();
   if(st && p.on && room()>=3){
     if(w && !physics._w){
@@ -313,6 +337,7 @@ function physics(){
   }
   physics._w=w; physics._s=s;
 
+  // dash — dead until you leave Lerugnen
   if(leftB && dashDown && !p.dash && !p.dashCd && !p.catch){
     const dir = left&&!right ? -1 : right&&!left ? 1 : p.face;
     if(p.wall){ p.face=-p.wallDir; p.vx=-p.wallDir*DASH_SPD; p.wall=0; }
@@ -329,6 +354,7 @@ function physics(){
   if(p.dashCd) p.dashCd--;
 
   if(catchCd) catchCd--;
+  // climb onto a caught lip with A/D toward it, or Space hops off
   if(p.catch){
     if(right && p.catchDir<0){ p.x+=6; p.catch=0; p.on=1; catchCd=10; }
     else if(left && p.catchDir>0){ p.x-=6; p.catch=0; p.on=1; catchCd=10; }
@@ -337,6 +363,7 @@ function physics(){
     }
   }
 
+  // walk
   if(!p.dash && !p.catch){
     const spd=WALK*(p.proud?1:0.9);
     if(left&&!right){ p.vx+=( -spd-p.vx)*(p.on?0.35:0.22); p.face=-1; }
@@ -345,6 +372,7 @@ function physics(){
     if(Math.abs(p.vx)<0.05) p.vx=0;
   }
 
+  // jump / wall jump / climb from catch
   const canJump=p.on || p.coyote>0 || p.wall || p.catch;
   if(p.buf && canJump){
     if(p.catch){
@@ -359,6 +387,7 @@ function physics(){
     }
   }
 
+  // gravity
   if(!p.catch){
     if(p.wall && p.vy>0) p.vy=Math.min(p.vy+GRAV*0.35, WALL_SLIDE);
     else p.vy+=GRAV;
@@ -367,6 +396,7 @@ function physics(){
 
   if(p.on) p.coyote=COYOTE; else if(p.coyote) p.coyote--;
 
+  // integrate X
   p.x+=p.vx;
   p.wall=0;
   {
@@ -380,6 +410,7 @@ function physics(){
     }
   }
 
+  // integrate Y
   p.on=0;
   p.y+=p.vy;
   {
@@ -396,24 +427,30 @@ function physics(){
 
   if(!p.on) tryCatch();
 
+  // falling platform
   if(faller.t>8 && !faller.fall){ faller.fall=1; }
   if(faller.fall){ faller.y+=0.7; if(faller.y>18*T) faller.gone=1; }
 
+  // fall off
   if(p.y>16*T){
     puff(p.x,p.y,10,C.smoke);
     p.x=lastSolid.x; p.y=lastSolid.y; p.z=lastSolid.z; p.vx=0; p.vy=0;
   }
 
+  // squash recover
   p.squash+=(1-p.squash)*0.18;
   if(p.shine) p.shine--;
 
+  // proud wait
   if(p.on && Math.abs(p.vx)<0.08){ p.wait++; if(p.wait>90) p.wait=90; }
   else p.wait=0;
 
+  // myrrh
   if(!myrrh.got && p.z===1 && Math.hypot(p.x-myrrh.x,p.y-myrrh.y)<14){
     myrrh.got=1; puff(myrrh.x,myrrh.y,14,C.myrrh); p.shine=24;
   }
 
+  // lamp follow
   lamp.bob+=0.07;
   if(lamp.docked && p.x>lampDock.x+10){ lamp.docked=0; lamp.follow=1; }
   if(lamp.follow){
@@ -428,6 +465,7 @@ function physics(){
 
   if(p.x>lerugn.x-8 && p.z>=1) ended=1;
 
+  // folks
   for(const f of folks){
     f.x+=f.vx;
     if(f.x<f.min||f.x>f.max) f.vx*=-1;
@@ -567,9 +605,11 @@ function worldX(x){ return Math.round(x-camX+(shake? (Math.random()*2-1)*shake :
 function drawLayer(z){
   const sc=lyScale(z), yo=lyY(z), a=lyShade(z);
   ctx.save();
+  // backdrop strip
   const yBase=11*T+yo;
   pix(0, yBase+8, W, H, z===2?"#0a0a12": z===0?"#12101a":"#0d0c14");
 
+  // roots / pillars from tiles
   ctx.globalAlpha=a*0.85;
   for(let i=0;i<22;i++){
     const rx=worldX(i*32+z*11);
@@ -581,15 +621,18 @@ function drawLayer(z){
   drawClock(worldX(20)+8, 18+yo, a*0.9);
   drawClock(worldX(72*T)+6, 22+yo, a*0.7);
 
+  // hanging root room 1
   if(z===1){
     pix(worldX(12*T), 8, 3, 40, "#2a2030");
     pix(worldX(12*T)-2, 46, 8, 4, "#3a2a28");
+    // Lerugnen: council painting + Ea-Nasir
     pix(worldX(hub.x+80), 10*T+yo-6, 7, 12, "#3a2a22");
     pix(worldX(hub.x+81), 10*T+yo-10, 5, 5, "#c9a06a");
     pix(worldX(hub.x+80), 10*T+yo+6, 3, 4, "#2a2018");
     pix(worldX(hub.x+84), 10*T+yo+6, 3, 4, "#2a2018");
   }
 
+  // stations marks
   for(const s of stations){
     if(s.z!==z) continue;
     ctx.globalAlpha=a;
@@ -608,6 +651,7 @@ function drawLayer(z){
     pix(worldX(crossing.x)+4, crossing.y+yo+10, crossing.w-8, 2, C.cyan);
   }
 
+  // solids this layer
   for(const s of solids){
     if(s.z!==z) continue;
     drawSolid(s, worldX(s.x), s.y+yo, a);
@@ -622,6 +666,7 @@ function drawLayer(z){
     ctx.fillRect(lx-48,ly-48,96,96);
   }
 
+  // folks
   for(const f of folks){
     if(f.z!==z) continue;
     ctx.globalAlpha=a*0.55;
@@ -629,12 +674,14 @@ function drawLayer(z){
     pix(worldX(f.x)+1, f.y+yo-3, 3, 3, "#1a1428");
   }
 
+  // myrrh
   if(z===1 && !myrrh.got){
     ctx.globalAlpha=a;
     pix(worldX(myrrh.x), myrrh.y+yo+Math.sin(tick/10)*1, 4, 4, C.myrrh);
     pix(worldX(myrrh.x)+1, myrrh.y+yo-2+Math.sin(tick/10)*1, 2, 2, C.gold2);
   }
 
+  // lerugn glow
   if(z>=1){
     ctx.globalAlpha=a*(ended?0.35:0.12);
     ctx.fillStyle=C.flame;
@@ -644,6 +691,7 @@ function drawLayer(z){
     pix(worldX(lerugn.x)+4, 8*T+yo, 10, 10, C.flame);
   }
 
+  // ghosts then rabbit then lamp
   if(z===p.z){
     for(const g of ghosts){
       drawRabbit(worldX(g.x), g.y+yo, g.face, g.proud, (g.t/8)*0.45, 1);
@@ -655,6 +703,7 @@ function drawLayer(z){
   }
   if(z===lamp.z) drawLamp(worldX(lamp.x), lamp.y+yo, a);
 
+  // dust
   for(const d of dust){
     ctx.globalAlpha=Math.max(0,d.t/20)*a;
     pix(worldX(d.x), d.y+yo, 2, 2, d.col);
@@ -675,8 +724,10 @@ function glyphs(){
 
 function drawTitle(){
   ctx.fillStyle=C.bg; ctx.fillRect(0,0,W,H);
+  // pillars
   for(let i=0;i<8;i++) pix(20+i*46, 30, 6, 160, C.stone);
   drawLamp(W/2-6, 78, 1);
+  // LAMPAN
   const word="LAMPAN";
   ctx.fillStyle=C.gold2;
   ctx.font="bold 18px monospace";
@@ -690,7 +741,9 @@ function frame(){
   if(state==="play"){ physics(); cam(); }
   ctx.fillStyle=C.bg; ctx.fillRect(0,0,W,H);
   if(state==="title"){ drawTitle(); requestAnimationFrame(frame); return; }
+  // sky grain
   ctx.fillStyle="#0a0910"; ctx.fillRect(0,0,W,70);
+  // draw deep -> mid -> near
   drawLayer(2);
   drawLayer(1);
   drawLayer(0);
